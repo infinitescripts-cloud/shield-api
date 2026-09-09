@@ -13,10 +13,10 @@ const router = express.Router();
 
 /*
  * GET /v1/keys/create
- * Browser-friendly admin key creation
+ * Admin only
  *
- * Example:
- * /v1/keys/create?scriptId=3&token=YOUR_TOKEN
+ * Browser testing:
+ * /v1/keys/create?scriptId=3&token=YOUR_ADMIN_TOKEN
  */
 router.get("/create", adminAuth, async (req, res) => {
   try {
@@ -83,6 +83,7 @@ router.post("/create", adminAuth, async (req, res) => {
 
     return res.status(201).json({
       success: true,
+      message: "Key created",
       key: result.key,
       id: result.id,
       scriptId: result.script_id,
@@ -107,16 +108,20 @@ router.post("/create", adminAuth, async (req, res) => {
 });
 
 /*
- * POST /v1/keys/validate
- * Public client endpoint
+ * GET /v1/keys/validate
+ * Browser testing only
+ *
+ * Example:
+ * /v1/keys/validate?key=SHIELD-XXXXX-XXXXX-XXXXX
  */
-router.post("/validate", async (req, res) => {
+router.get("/validate", async (req, res) => {
   try {
-    const { key } = req.body;
+    const key = req.query.key;
 
     if (!key) {
       return res.status(400).json({
         success: false,
+        valid: false,
         error: "KEY_REQUIRED"
       });
     }
@@ -126,6 +131,7 @@ router.post("/validate", async (req, res) => {
     if (!result) {
       return res.status(404).json({
         success: false,
+        valid: false,
         error: "KEY_NOT_FOUND"
       });
     }
@@ -133,6 +139,7 @@ router.post("/validate", async (req, res) => {
     if (result.status !== "active") {
       return res.status(403).json({
         success: false,
+        valid: false,
         error: "KEY_INACTIVE"
       });
     }
@@ -143,6 +150,7 @@ router.post("/validate", async (req, res) => {
     ) {
       return res.status(403).json({
         success: false,
+        valid: false,
         error: "KEY_EXPIRED"
       });
     }
@@ -162,6 +170,73 @@ router.post("/validate", async (req, res) => {
 
     return res.status(500).json({
       success: false,
+      valid: false,
+      error: "INTERNAL_ERROR"
+    });
+  }
+});
+
+/*
+ * POST /v1/keys/validate
+ * Public client endpoint
+ */
+router.post("/validate", async (req, res) => {
+  try {
+    const { key } = req.body;
+
+    if (!key) {
+      return res.status(400).json({
+        success: false,
+        valid: false,
+        error: "KEY_REQUIRED"
+      });
+    }
+
+    const result = await getKeyByPlaintext(key);
+
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        valid: false,
+        error: "KEY_NOT_FOUND"
+      });
+    }
+
+    if (result.status !== "active") {
+      return res.status(403).json({
+        success: false,
+        valid: false,
+        error: "KEY_INACTIVE"
+      });
+    }
+
+    if (
+      result.expires_at &&
+      new Date(result.expires_at).getTime() <= Date.now()
+    ) {
+      return res.status(403).json({
+        success: false,
+        valid: false,
+        error: "KEY_EXPIRED"
+      });
+    }
+
+    return res.json({
+      success: true,
+      valid: true,
+      key: {
+        id: result.id,
+        scriptId: result.script_id,
+        status: result.status,
+        expiresAt: result.expires_at
+      }
+    });
+  } catch (error) {
+    console.error("Validate key error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      valid: false,
       error: "INTERNAL_ERROR"
     });
   }
@@ -184,6 +259,7 @@ router.post("/:id/revoke", adminAuth, async (req, res) => {
 
     return res.json({
       success: true,
+      message: "Key revoked",
       id: result.id,
       status: result.status
     });
@@ -214,6 +290,7 @@ router.post("/:id/reset-hwid", adminAuth, async (req, res) => {
 
     return res.json({
       success: true,
+      message: "HWID reset",
       id: result.id,
       hwidReset: true
     });
