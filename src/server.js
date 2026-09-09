@@ -6,6 +6,7 @@ const {
 } = require("./database");
 
 const keysRouter = require("./routes/keys");
+const scriptsRouter = require("./routes/scripts");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -50,12 +51,17 @@ app.get("/v1/health", async (req, res) => {
 });
 
 /*
- * Key management
+ * Key routes
  */
 app.use("/v1/keys", keysRouter);
 
 /*
- * Start server
+ * Script routes
+ */
+app.use("/v1/scripts", scriptsRouter);
+
+/*
+ * Start Shield API
  */
 async function start() {
   try {
