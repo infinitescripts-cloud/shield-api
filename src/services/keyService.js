@@ -14,6 +14,39 @@ function hashValue(value) {
     .digest("hex");
 }
 
+async function logAuth({
+  keyId = null,
+  scriptId = null,
+  success,
+  reason,
+  ipAddress = null
+}) {
+  try {
+    await pool.query(
+      `
+        INSERT INTO auth_logs (
+          key_id,
+          script_id,
+          success,
+          reason,
+          ip_address
+        )
+        VALUES ($1, $2, $3, $4, $5)
+      `,
+      [
+        keyId,
+        scriptId,
+        success,
+        reason,
+        ipAddress
+      ]
+    );
+  } catch (error) {
+    // Logging failure must never break authentication.
+    console.error("Auth log error:", error.message);
+  }
+}
+
 async function createKey({ scriptId, expiresAt = null }) {
   const key = generateKey();
   const keyHash = hashValue(key);
@@ -61,16 +94,15 @@ async function getKeyByPlaintext(key) {
 }
 
 /*
- * Validate a key and optionally bind/check its HWID.
+ * Validate key + optional HWID.
  *
- * First use:
- *   No HWID stored -> bind supplied HWID.
+ * First HWID use:
+ *   binds the key.
  *
- * Later use:
- *   Same HWID -> valid.
- *   Different HWID -> mismatch.
+ * Existing HWID:
+ *   must match.
  */
-async function validateKey(key, hwid = null) {
+async function validateKey(key, hwid = null, ipAddress = null) {
   const keyHash = hashValue(key);
 
   const result = await pool.query(
@@ -93,6 +125,12 @@ async function validateKey(key, hwid = null) {
   const record = result.rows[0];
 
   if (!record) {
+    await logAuth({
+      success: false,
+      reason: "KEY_NOT_FOUND",
+      ipAddress
+    });
+
     return {
       valid: false,
       error: "KEY_NOT_FOUND"
@@ -100,6 +138,14 @@ async function validateKey(key, hwid = null) {
   }
 
   if (record.status !== "active") {
+    await logAuth({
+      keyId: record.id,
+      scriptId: record.script_id,
+      success: false,
+      reason: "KEY_INACTIVE",
+      ipAddress
+    });
+
     return {
       valid: false,
       error: "KEY_INACTIVE",
@@ -111,6 +157,14 @@ async function validateKey(key, hwid = null) {
     record.expires_at &&
     new Date(record.expires_at).getTime() <= Date.now()
   ) {
+    await logAuth({
+      keyId: record.id,
+      scriptId: record.script_id,
+      success: false,
+      reason: "KEY_EXPIRED",
+      ipAddress
+    });
+
     return {
       valid: false,
       error: "KEY_EXPIRED",
@@ -119,13 +173,13 @@ async function validateKey(key, hwid = null) {
   }
 
   /*
-   * If an HWID is supplied, enforce binding.
+   * HWID protection.
    */
   if (hwid) {
     const incomingHwidHash = hashValue(hwid);
 
     /*
-     * First successful HWID use binds the key.
+     * First use: bind HWID.
      */
     if (!record.hwid_hash) {
       const bindResult = await pool.query(
@@ -147,6 +201,14 @@ async function validateKey(key, hwid = null) {
         [incomingHwidHash, record.id]
       );
 
+      await logAuth({
+        keyId: record.id,
+        scriptId: record.script_id,
+        success: true,
+        reason: "HWID_BOUND",
+        ipAddress
+      });
+
       return {
         valid: true,
         bound: true,
@@ -155,9 +217,17 @@ async function validateKey(key, hwid = null) {
     }
 
     /*
-     * Existing binding must match.
+     * Existing HWID must match.
      */
     if (record.hwid_hash !== incomingHwidHash) {
+      await logAuth({
+        keyId: record.id,
+        scriptId: record.script_id,
+        success: false,
+        reason: "HWID_MISMATCH",
+        ipAddress
+      });
+
       return {
         valid: false,
         error: "HWID_MISMATCH",
@@ -166,7 +236,7 @@ async function validateKey(key, hwid = null) {
     }
 
     /*
-     * Same HWID: update last-used timestamp.
+     * Correct HWID.
      */
     const updateResult = await pool.query(
       `
@@ -185,6 +255,14 @@ async function validateKey(key, hwid = null) {
       [record.id]
     );
 
+    await logAuth({
+      keyId: record.id,
+      scriptId: record.script_id,
+      success: true,
+      reason: "VALID",
+      ipAddress
+    });
+
     return {
       valid: true,
       bound: true,
@@ -194,8 +272,15 @@ async function validateKey(key, hwid = null) {
 
   /*
    * No HWID supplied.
-   * We can still validate the key, but we don't bind it.
    */
+  await logAuth({
+    keyId: record.id,
+    scriptId: record.script_id,
+    success: true,
+    reason: "VALID_NO_HWID",
+    ipAddress
+  });
+
   return {
     valid: true,
     bound: Boolean(record.hwid_hash),
@@ -238,5 +323,6 @@ module.exports = {
   getKeyByPlaintext,
   validateKey,
   revokeKey,
-  resetHwid
+  resetHwid,
+  logAuth
 };
