@@ -13,7 +13,11 @@ const router = express.Router();
 
 /*
  * GET /v1/keys/create
- * Admin/browser testing
+ *
+ * Admin/browser testing.
+ *
+ * Example:
+ * /v1/keys/create?scriptId=3&token=YOUR_ADMIN_TOKEN
  */
 router.get("/create", adminAuth, async (req, res) => {
   try {
@@ -60,7 +64,14 @@ router.get("/create", adminAuth, async (req, res) => {
 
 /*
  * POST /v1/keys/create
- * Admin only
+ *
+ * Admin API.
+ *
+ * Body:
+ * {
+ *   "scriptId": 3,
+ *   "expiresAt": null
+ * }
  */
 router.post("/create", adminAuth, async (req, res) => {
   try {
@@ -74,7 +85,7 @@ router.post("/create", adminAuth, async (req, res) => {
     }
 
     const result = await createKey({
-      scriptId,
+      scriptId: Number(scriptId),
       expiresAt: expiresAt || null
     });
 
@@ -106,10 +117,11 @@ router.post("/create", adminAuth, async (req, res) => {
 
 /*
  * GET /v1/keys/validate
- * Browser testing
+ *
+ * Browser testing.
  *
  * Example:
- * /v1/keys/validate?key=SHIELD-...&hwid=device-123
+ * /v1/keys/validate?key=SHIELD-XXXXX-XXXXX-XXXXX&hwid=test-device-001
  */
 router.get("/validate", async (req, res) => {
   try {
@@ -123,7 +135,11 @@ router.get("/validate", async (req, res) => {
       });
     }
 
-    const result = await validateKey(key, hwid || null);
+    const result = await validateKey(
+      key,
+      hwid || null,
+      req.ip
+    );
 
     if (!result.valid) {
       return res.status(403).json({
@@ -159,12 +175,13 @@ router.get("/validate", async (req, res) => {
 
 /*
  * POST /v1/keys/validate
- * Public client endpoint
+ *
+ * Public client endpoint.
  *
  * Body:
  * {
- *   "key": "SHIELD-...",
- *   "hwid": "device-123"
+ *   "key": "SHIELD-XXXXX-XXXXX-XXXXX",
+ *   "hwid": "device-001"
  * }
  */
 router.post("/validate", async (req, res) => {
@@ -179,7 +196,11 @@ router.post("/validate", async (req, res) => {
       });
     }
 
-    const result = await validateKey(key, hwid || null);
+    const result = await validateKey(
+      key,
+      hwid || null,
+      req.ip
+    );
 
     if (!result.valid) {
       return res.status(403).json({
@@ -215,7 +236,8 @@ router.post("/validate", async (req, res) => {
 
 /*
  * POST /v1/keys/:id/revoke
- * Admin only
+ *
+ * Admin only.
  */
 router.post("/:id/revoke", adminAuth, async (req, res) => {
   try {
@@ -246,7 +268,8 @@ router.post("/:id/revoke", adminAuth, async (req, res) => {
 
 /*
  * POST /v1/keys/:id/reset-hwid
- * Admin only
+ *
+ * Admin only.
  */
 router.post("/:id/reset-hwid", adminAuth, async (req, res) => {
   try {
