@@ -13,7 +13,6 @@ function safeEqual(a, b) {
 
 function adminAuth(req, res, next) {
   const expected = process.env.SHIELD_ADMIN_TOKEN;
-  const provided = req.get("Authorization");
 
   if (!expected) {
     return res.status(503).json({
@@ -22,14 +21,26 @@ function adminAuth(req, res, next) {
     });
   }
 
-  if (!provided || !provided.startsWith("Bearer ")) {
+  // Normal method: Authorization: Bearer TOKEN
+  const authorization = req.get("Authorization");
+
+  // Temporary browser testing method
+  const queryToken = req.query.token;
+
+  let token = null;
+
+  if (authorization && authorization.startsWith("Bearer ")) {
+    token = authorization.slice(7);
+  } else if (queryToken) {
+    token = queryToken;
+  }
+
+  if (!token) {
     return res.status(401).json({
       success: false,
       error: "AUTH_REQUIRED"
     });
   }
-
-  const token = provided.slice(7);
 
   if (!safeEqual(token, expected)) {
     return res.status(403).json({
