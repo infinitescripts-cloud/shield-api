@@ -12,6 +12,56 @@ const adminAuth = require("../middleware/adminAuth");
 const router = express.Router();
 
 /*
+ * GET /v1/keys/create
+ * Browser-friendly admin key creation
+ *
+ * Example:
+ * /v1/keys/create?scriptId=3&token=YOUR_TOKEN
+ */
+router.get("/create", adminAuth, async (req, res) => {
+  try {
+    const scriptId = Number(req.query.scriptId);
+    const expiresAt = req.query.expiresAt || null;
+
+    if (!Number.isInteger(scriptId) || scriptId <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: "INVALID_SCRIPT_ID"
+      });
+    }
+
+    const result = await createKey({
+      scriptId,
+      expiresAt
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Key created",
+      key: result.key,
+      id: result.id,
+      scriptId: result.script_id,
+      status: result.status,
+      expiresAt: result.expires_at
+    });
+  } catch (error) {
+    console.error("Create key error:", error.message);
+
+    if (error.code === "23503") {
+      return res.status(404).json({
+        success: false,
+        error: "SCRIPT_NOT_FOUND"
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: "INTERNAL_ERROR"
+    });
+  }
+});
+
+/*
  * POST /v1/keys/create
  * Admin only
  */
@@ -40,7 +90,14 @@ router.post("/create", adminAuth, async (req, res) => {
       expiresAt: result.expires_at
     });
   } catch (error) {
-    console.error("Create key error:", error);
+    console.error("Create key error:", error.message);
+
+    if (error.code === "23503") {
+      return res.status(404).json({
+        success: false,
+        error: "SCRIPT_NOT_FOUND"
+      });
+    }
 
     return res.status(500).json({
       success: false,
@@ -73,8 +130,26 @@ router.post("/validate", async (req, res) => {
       });
     }
 
+    if (result.status !== "active") {
+      return res.status(403).json({
+        success: false,
+        error: "KEY_INACTIVE"
+      });
+    }
+
+    if (
+      result.expires_at &&
+      new Date(result.expires_at).getTime() <= Date.now()
+    ) {
+      return res.status(403).json({
+        success: false,
+        error: "KEY_EXPIRED"
+      });
+    }
+
     return res.json({
       success: true,
+      valid: true,
       key: {
         id: result.id,
         scriptId: result.script_id,
@@ -83,7 +158,7 @@ router.post("/validate", async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Validate key error:", error);
+    console.error("Validate key error:", error.message);
 
     return res.status(500).json({
       success: false,
@@ -113,7 +188,7 @@ router.post("/:id/revoke", adminAuth, async (req, res) => {
       status: result.status
     });
   } catch (error) {
-    console.error("Revoke key error:", error);
+    console.error("Revoke key error:", error.message);
 
     return res.status(500).json({
       success: false,
@@ -143,7 +218,7 @@ router.post("/:id/reset-hwid", adminAuth, async (req, res) => {
       hwidReset: true
     });
   } catch (error) {
-    console.error("Reset HWID error:", error);
+    console.error("Reset HWID error:", error.message);
 
     return res.status(500).json({
       success: false,
