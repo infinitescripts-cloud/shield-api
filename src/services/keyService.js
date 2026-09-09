@@ -10,7 +10,7 @@ function generateKey() {
 function hashValue(value) {
   return crypto
     .createHash("sha256")
-    .update(value)
+    .update(String(value))
     .digest("hex");
 }
 
@@ -60,6 +60,149 @@ async function getKeyByPlaintext(key) {
   return result.rows[0] || null;
 }
 
+/*
+ * Validate a key and optionally bind/check its HWID.
+ *
+ * First use:
+ *   No HWID stored -> bind supplied HWID.
+ *
+ * Later use:
+ *   Same HWID -> valid.
+ *   Different HWID -> mismatch.
+ */
+async function validateKey(key, hwid = null) {
+  const keyHash = hashValue(key);
+
+  const result = await pool.query(
+    `
+      SELECT
+        id,
+        script_id,
+        status,
+        hwid_hash,
+        expires_at,
+        created_at,
+        last_used_at
+      FROM keys
+      WHERE key_hash = $1
+      LIMIT 1
+    `,
+    [keyHash]
+  );
+
+  const record = result.rows[0];
+
+  if (!record) {
+    return {
+      valid: false,
+      error: "KEY_NOT_FOUND"
+    };
+  }
+
+  if (record.status !== "active") {
+    return {
+      valid: false,
+      error: "KEY_INACTIVE",
+      key: record
+    };
+  }
+
+  if (
+    record.expires_at &&
+    new Date(record.expires_at).getTime() <= Date.now()
+  ) {
+    return {
+      valid: false,
+      error: "KEY_EXPIRED",
+      key: record
+    };
+  }
+
+  /*
+   * If an HWID is supplied, enforce binding.
+   */
+  if (hwid) {
+    const incomingHwidHash = hashValue(hwid);
+
+    /*
+     * First successful HWID use binds the key.
+     */
+    if (!record.hwid_hash) {
+      const bindResult = await pool.query(
+        `
+          UPDATE keys
+          SET
+            hwid_hash = $1,
+            last_used_at = NOW()
+          WHERE id = $2
+          RETURNING
+            id,
+            script_id,
+            status,
+            hwid_hash,
+            expires_at,
+            created_at,
+            last_used_at
+        `,
+        [incomingHwidHash, record.id]
+      );
+
+      return {
+        valid: true,
+        bound: true,
+        key: bindResult.rows[0]
+      };
+    }
+
+    /*
+     * Existing binding must match.
+     */
+    if (record.hwid_hash !== incomingHwidHash) {
+      return {
+        valid: false,
+        error: "HWID_MISMATCH",
+        key: record
+      };
+    }
+
+    /*
+     * Same HWID: update last-used timestamp.
+     */
+    const updateResult = await pool.query(
+      `
+        UPDATE keys
+        SET last_used_at = NOW()
+        WHERE id = $1
+        RETURNING
+          id,
+          script_id,
+          status,
+          hwid_hash,
+          expires_at,
+          created_at,
+          last_used_at
+      `,
+      [record.id]
+    );
+
+    return {
+      valid: true,
+      bound: true,
+      key: updateResult.rows[0]
+    };
+  }
+
+  /*
+   * No HWID supplied.
+   * We can still validate the key, but we don't bind it.
+   */
+  return {
+    valid: true,
+    bound: Boolean(record.hwid_hash),
+    key: record
+  };
+}
+
 async function revokeKey(id) {
   const result = await pool.query(
     `
@@ -93,6 +236,7 @@ module.exports = {
   hashValue,
   createKey,
   getKeyByPlaintext,
+  validateKey,
   revokeKey,
   resetHwid
 };
