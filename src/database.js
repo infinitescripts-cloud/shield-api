@@ -1,92 +1,87 @@
-const { Pool } = require("pg");
+const express = require("express");
+const router = express.Router();
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL environment variable is not set");
+const { pool } = require("../database");
+
+function adminAuth(req, res, next) {
+  const token = req.query.token;
+
+  if (!process.env.SHIELD_ADMIN_TOKEN) {
+    return res.status(500).json({
+      success: false,
+      error: "ADMIN_TOKEN_NOT_CONFIGURED"
+    });
+  }
+
+  if (!token || token !== process.env.SHIELD_ADMIN_TOKEN) {
+    return res.status(401).json({
+      success: false,
+      error: "UNAUTHORIZED"
+    });
+  }
+
+  next();
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000
+// Create script from mobile browser
+router.get("/create", adminAuth, async (req, res) => {
+  try {
+    const name = req.query.name || "Reboot";
+    const identifier = req.query.identifier || "reboot";
+    const version = req.query.version || "1.0.0";
+
+    const result = await pool.query(
+      `
+      INSERT INTO scripts (name, identifier, version)
+      VALUES ($1, $2, $3)
+      RETURNING id, name, identifier, version, status, created_at
+      `,
+      [name, identifier, version]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "Script created",
+      script: result.rows[0]
+    });
+  } catch (error) {
+    console.error("Create script error:", error.message);
+
+    if (error.code === "23505") {
+      return res.status(409).json({
+        success: false,
+        error: "SCRIPT_IDENTIFIER_ALREADY_EXISTS"
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: "FAILED_TO_CREATE_SCRIPT"
+    });
+  }
 });
 
-pool.on("error", (error) => {
-  console.error("PostgreSQL pool error:", error.message);
+// List scripts
+router.get("/", adminAuth, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, identifier, version, status, created_at, updated_at
+      FROM scripts
+      ORDER BY id DESC
+    `);
+
+    return res.json({
+      success: true,
+      scripts: result.rows
+    });
+  } catch (error) {
+    console.error("Scripts GET error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: "FAILED_TO_FETCH_SCRIPTS"
+    });
+  }
 });
 
-async function testDatabase() {
-  const result = await pool.query("SELECT NOW() AS time");
-  return result.rows[0].time;
-}
-
-async function initializeDatabase() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id BIGSERIAL PRIMARY KEY,
-      username VARCHAR(64) UNIQUE NOT NULL,
-      email VARCHAR(255) UNIQUE,
-      password_hash TEXT,
-      role VARCHAR(32) NOT NULL DEFAULT 'developer',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS scripts (
-      id BIGSERIAL PRIMARY KEY,
-      name VARCHAR(128) NOT NULL,
-      identifier VARCHAR(128) UNIQUE NOT NULL,
-      version VARCHAR(32) NOT NULL DEFAULT '1.0.0',
-      status VARCHAR(32) NOT NULL DEFAULT 'active',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS keys (
-      id BIGSERIAL PRIMARY KEY,
-      key_hash TEXT UNIQUE NOT NULL,
-      script_id BIGINT REFERENCES scripts(id) ON DELETE CASCADE,
-      status VARCHAR(32) NOT NULL DEFAULT 'active',
-      hwid_hash TEXT,
-      expires_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      last_used_at TIMESTAMPTZ
-    );
-
-    CREATE TABLE IF NOT EXISTS sessions (
-      id BIGSERIAL PRIMARY KEY,
-      token_hash TEXT UNIQUE NOT NULL,
-      key_id BIGINT REFERENCES keys(id) ON DELETE CASCADE,
-      hwid_hash TEXT,
-      expires_at TIMESTAMPTZ NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS auth_logs (
-      id BIGSERIAL PRIMARY KEY,
-      key_id BIGINT REFERENCES keys(id) ON DELETE SET NULL,
-      script_id BIGINT REFERENCES scripts(id) ON DELETE SET NULL,
-      success BOOLEAN NOT NULL,
-      reason VARCHAR(128),
-      ip_address INET,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_keys_script_id
-      ON keys(script_id);
-
-    CREATE INDEX IF NOT EXISTS idx_keys_status
-      ON keys(status);
-
-    CREATE INDEX IF NOT EXISTS idx_sessions_key_id
-      ON sessions(key_id);
-
-    CREATE INDEX IF NOT EXISTS idx_auth_logs_created_at
-      ON auth_logs(created_at);
-  `);
-}
-
-module.exports = {
-  pool,
-  testDatabase,
-  initializeDatabase
-};
+module.exports = router;
