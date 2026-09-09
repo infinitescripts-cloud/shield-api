@@ -23,52 +23,116 @@ function adminAuth(req, res, next) {
   next();
 }
 
-// Browser-friendly admin script creation
+/*
+ * Create script from mobile browser
+ * TEMPORARY diagnostic version
+ */
 router.get("/create", adminAuth, async (req, res) => {
   try {
     const name = req.query.name || "Reboot";
+    const identifier = req.query.identifier || "reboot";
+    const version = req.query.version || "1.0.0";
 
     const result = await pool.query(
-      `INSERT INTO scripts (name)
-       VALUES ($1)
-       RETURNING id, name, created_at`,
-      [name]
+      `
+      INSERT INTO scripts (name, identifier, version)
+      VALUES ($1, $2, $3)
+      RETURNING id, name, identifier, version, status, created_at
+      `,
+      [name, identifier, version]
     );
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: "Script created",
       script: result.rows[0]
     });
   } catch (error) {
-    console.error("Create script error:", error.message);
+    console.error("Create script error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      error: "FAILED_TO_CREATE_SCRIPT"
+      error: "FAILED_TO_CREATE_SCRIPT",
+      details: error.message,
+      code: error.code
     });
   }
 });
 
-// List scripts
+/*
+ * List scripts
+ */
 router.get("/", adminAuth, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, name, created_at
+      SELECT
+        id,
+        name,
+        identifier,
+        version,
+        status,
+        created_at,
+        updated_at
       FROM scripts
       ORDER BY id DESC
     `);
 
-    res.json({
+    return res.json({
       success: true,
       scripts: result.rows
     });
   } catch (error) {
-    console.error("Scripts GET error:", error.message);
+    console.error("Scripts GET error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      error: "FAILED_TO_FETCH_SCRIPTS"
+      error: "FAILED_TO_FETCH_SCRIPTS",
+      details: error.message,
+      code: error.code
+    });
+  }
+});
+
+/*
+ * Get one script
+ */
+router.get("/:id", adminAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        id,
+        name,
+        identifier,
+        version,
+        status,
+        created_at,
+        updated_at
+      FROM scripts
+      WHERE id = $1
+      `,
+      [req.params.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "SCRIPT_NOT_FOUND"
+      });
+    }
+
+    return res.json({
+      success: true,
+      script: result.rows[0]
+    });
+  } catch (error) {
+    console.error("Script GET error:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "FAILED_TO_FETCH_SCRIPT",
+      details: error.message,
+      code: error.code
     });
   }
 });
