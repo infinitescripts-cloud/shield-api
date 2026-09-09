@@ -1,13 +1,14 @@
 {
   "name": "shield-api",
   "version": "1.0.0",
-  "description": "Shield licensing API",
+  "description": "Shield licensing and authentication API",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js"
   },
   "dependencies": {
-  "express": "^5.1.0",
-  "pg": "^8.16.3"
+    "express": "^5.1.0",
+    "pg": "^8.16.3"
+  }
 }
