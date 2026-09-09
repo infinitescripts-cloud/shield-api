@@ -2,7 +2,7 @@ const express = require("express");
 
 const {
   createKey,
-  getKeyByPlaintext,
+  validateKey,
   revokeKey,
   resetHwid
 } = require("../services/keyService");
@@ -13,10 +13,7 @@ const router = express.Router();
 
 /*
  * GET /v1/keys/create
- * Admin only
- *
- * Browser testing:
- * /v1/keys/create?scriptId=3&token=YOUR_ADMIN_TOKEN
+ * Admin/browser testing
  */
 router.get("/create", adminAuth, async (req, res) => {
   try {
@@ -109,14 +106,14 @@ router.post("/create", adminAuth, async (req, res) => {
 
 /*
  * GET /v1/keys/validate
- * Browser testing only
+ * Browser testing
  *
  * Example:
- * /v1/keys/validate?key=SHIELD-XXXXX-XXXXX-XXXXX
+ * /v1/keys/validate?key=SHIELD-...&hwid=device-123
  */
 router.get("/validate", async (req, res) => {
   try {
-    const key = req.query.key;
+    const { key, hwid } = req.query;
 
     if (!key) {
       return res.status(400).json({
@@ -126,43 +123,27 @@ router.get("/validate", async (req, res) => {
       });
     }
 
-    const result = await getKeyByPlaintext(key);
+    const result = await validateKey(key, hwid || null);
 
-    if (!result) {
-      return res.status(404).json({
-        success: false,
-        valid: false,
-        error: "KEY_NOT_FOUND"
-      });
-    }
-
-    if (result.status !== "active") {
+    if (!result.valid) {
       return res.status(403).json({
         success: false,
         valid: false,
-        error: "KEY_INACTIVE"
-      });
-    }
-
-    if (
-      result.expires_at &&
-      new Date(result.expires_at).getTime() <= Date.now()
-    ) {
-      return res.status(403).json({
-        success: false,
-        valid: false,
-        error: "KEY_EXPIRED"
+        error: result.error
       });
     }
 
     return res.json({
       success: true,
       valid: true,
+      bound: result.bound,
       key: {
-        id: result.id,
-        scriptId: result.script_id,
-        status: result.status,
-        expiresAt: result.expires_at
+        id: result.key.id,
+        scriptId: result.key.script_id,
+        status: result.key.status,
+        expiresAt: result.key.expires_at,
+        hwidBound: Boolean(result.key.hwid_hash),
+        lastUsedAt: result.key.last_used_at
       }
     });
   } catch (error) {
@@ -179,10 +160,16 @@ router.get("/validate", async (req, res) => {
 /*
  * POST /v1/keys/validate
  * Public client endpoint
+ *
+ * Body:
+ * {
+ *   "key": "SHIELD-...",
+ *   "hwid": "device-123"
+ * }
  */
 router.post("/validate", async (req, res) => {
   try {
-    const { key } = req.body;
+    const { key, hwid } = req.body;
 
     if (!key) {
       return res.status(400).json({
@@ -192,43 +179,27 @@ router.post("/validate", async (req, res) => {
       });
     }
 
-    const result = await getKeyByPlaintext(key);
+    const result = await validateKey(key, hwid || null);
 
-    if (!result) {
-      return res.status(404).json({
-        success: false,
-        valid: false,
-        error: "KEY_NOT_FOUND"
-      });
-    }
-
-    if (result.status !== "active") {
+    if (!result.valid) {
       return res.status(403).json({
         success: false,
         valid: false,
-        error: "KEY_INACTIVE"
-      });
-    }
-
-    if (
-      result.expires_at &&
-      new Date(result.expires_at).getTime() <= Date.now()
-    ) {
-      return res.status(403).json({
-        success: false,
-        valid: false,
-        error: "KEY_EXPIRED"
+        error: result.error
       });
     }
 
     return res.json({
       success: true,
       valid: true,
+      bound: result.bound,
       key: {
-        id: result.id,
-        scriptId: result.script_id,
-        status: result.status,
-        expiresAt: result.expires_at
+        id: result.key.id,
+        scriptId: result.key.script_id,
+        status: result.key.status,
+        expiresAt: result.key.expires_at,
+        hwidBound: Boolean(result.key.hwid_hash),
+        lastUsedAt: result.key.last_used_at
       }
     });
   } catch (error) {
