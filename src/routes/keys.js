@@ -1,4 +1,5 @@
 const express = require("express");
+
 const {
   createKey,
   getKeyByPlaintext,
@@ -6,10 +7,15 @@ const {
   resetHwid
 } = require("../services/keyService");
 
+const adminAuth = require("../middleware/adminAuth");
+
 const router = express.Router();
 
-// Create a key
-router.post("/create", async (req, res) => {
+/*
+ * POST /v1/keys/create
+ * Admin only
+ */
+router.post("/create", adminAuth, async (req, res) => {
   try {
     const { scriptId, expiresAt } = req.body;
 
@@ -25,7 +31,7 @@ router.post("/create", async (req, res) => {
       expiresAt: expiresAt || null
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       key: result.key,
       id: result.id,
@@ -34,16 +40,19 @@ router.post("/create", async (req, res) => {
       expiresAt: result.expires_at
     });
   } catch (error) {
-    console.error("Create key error:", error.message);
+    console.error("Create key error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "INTERNAL_ERROR"
     });
   }
 });
 
-// Look up a key
+/*
+ * POST /v1/keys/validate
+ * Public client endpoint
+ */
 router.post("/validate", async (req, res) => {
   try {
     const { key } = req.body;
@@ -64,7 +73,7 @@ router.post("/validate", async (req, res) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       key: {
         id: result.id,
@@ -74,17 +83,20 @@ router.post("/validate", async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Validate key error:", error.message);
+    console.error("Validate key error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "INTERNAL_ERROR"
     });
   }
 });
 
-// Revoke a key
-router.post("/:id/revoke", async (req, res) => {
+/*
+ * POST /v1/keys/:id/revoke
+ * Admin only
+ */
+router.post("/:id/revoke", adminAuth, async (req, res) => {
   try {
     const result = await revokeKey(req.params.id);
 
@@ -95,23 +107,26 @@ router.post("/:id/revoke", async (req, res) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       id: result.id,
       status: result.status
     });
   } catch (error) {
-    console.error("Revoke key error:", error.message);
+    console.error("Revoke key error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "INTERNAL_ERROR"
     });
   }
 });
 
-// Reset HWID
-router.post("/:id/reset-hwid", async (req, res) => {
+/*
+ * POST /v1/keys/:id/reset-hwid
+ * Admin only
+ */
+router.post("/:id/reset-hwid", adminAuth, async (req, res) => {
   try {
     const result = await resetHwid(req.params.id);
 
@@ -122,15 +137,15 @@ router.post("/:id/reset-hwid", async (req, res) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       id: result.id,
       hwidReset: true
     });
   } catch (error) {
-    console.error("Reset HWID error:", error.message);
+    console.error("Reset HWID error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "INTERNAL_ERROR"
     });
