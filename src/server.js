@@ -7,6 +7,7 @@ const {
 
 const keysRouter = require("./routes/keys");
 const scriptsRouter = require("./routes/scripts");
+const logsRouter = require("./routes/logs");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -32,7 +33,7 @@ app.get("/v1/health", async (req, res) => {
   try {
     const databaseTime = await testDatabase();
 
-    res.json({
+    return res.json({
       success: true,
       service: "Shield API",
       version: "1.0.0",
@@ -40,9 +41,12 @@ app.get("/v1/health", async (req, res) => {
       databaseTime
     });
   } catch (error) {
-    console.error("Health check error:", error.message);
+    console.error(
+      "Health check error:",
+      error.message
+    );
 
-    res.status(503).json({
+    return res.status(503).json({
       success: false,
       service: "Shield API",
       database: "disconnected"
@@ -61,6 +65,36 @@ app.use("/v1/keys", keysRouter);
 app.use("/v1/scripts", scriptsRouter);
 
 /*
+ * Admin authentication logs
+ */
+app.use("/v1/admin/logs", logsRouter);
+
+/*
+ * Unknown route handler
+ */
+app.use((req, res) => {
+  return res.status(404).json({
+    success: false,
+    error: "NOT_FOUND"
+  });
+});
+
+/*
+ * Error handler
+ */
+app.use((error, req, res, next) => {
+  console.error(
+    "Unhandled server error:",
+    error.message
+  );
+
+  return res.status(500).json({
+    success: false,
+    error: "INTERNAL_ERROR"
+  });
+});
+
+/*
  * Start Shield API
  */
 async function start() {
@@ -73,10 +107,16 @@ async function start() {
     console.log("Database tables initialized.");
 
     app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Shield API listening on port ${PORT}`);
+      console.log(
+        `Shield API listening on port ${PORT}`
+      );
     });
   } catch (error) {
-    console.error("Failed to start Shield API:", error.message);
+    console.error(
+      "Failed to start Shield API:",
+      error.message
+    );
+
     process.exit(1);
   }
 }
