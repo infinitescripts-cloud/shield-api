@@ -7,14 +7,21 @@ const {
   resetHwid
 } = require("../services/keyService");
 
+const {
+  createSession,
+  validateSession,
+  revokeSession
+} = require("../services/sessionService");
+
 const adminAuth = require("../middleware/adminAuth");
 
 const router = express.Router();
 
+const SESSION_LIFETIME_SECONDS = 3600;
+
 /*
  * GET /v1/keys/create
- *
- * Admin/browser testing.
+ * Admin/browser testing
  *
  * Example:
  * /v1/keys/create?scriptId=3&token=YOUR_ADMIN_TOKEN
@@ -64,29 +71,23 @@ router.get("/create", adminAuth, async (req, res) => {
 
 /*
  * POST /v1/keys/create
- *
- * Admin API.
- *
- * Body:
- * {
- *   "scriptId": 3,
- *   "expiresAt": null
- * }
+ * Admin only
  */
 router.post("/create", adminAuth, async (req, res) => {
   try {
-    const { scriptId, expiresAt } = req.body;
+    const scriptId = Number(req.body.scriptId);
+    const expiresAt = req.body.expiresAt || null;
 
-    if (!scriptId) {
+    if (!Number.isInteger(scriptId) || scriptId <= 0) {
       return res.status(400).json({
         success: false,
-        error: "SCRIPT_ID_REQUIRED"
+        error: "INVALID_SCRIPT_ID"
       });
     }
 
     const result = await createKey({
-      scriptId: Number(scriptId),
-      expiresAt: expiresAt || null
+      scriptId,
+      expiresAt
     });
 
     return res.status(201).json({
@@ -121,11 +122,12 @@ router.post("/create", adminAuth, async (req, res) => {
  * Browser testing.
  *
  * Example:
- * /v1/keys/validate?key=SHIELD-XXXXX-XXXXX-XXXXX&hwid=test-device-001
+ * /v1/keys/validate?key=SHIELD-...&hwid=test-device-001
  */
 router.get("/validate", async (req, res) => {
   try {
-    const { key, hwid } = req.query;
+    const key = req.query.key;
+    const hwid = req.query.hwid || null;
 
     if (!key) {
       return res.status(400).json({
@@ -137,7 +139,7 @@ router.get("/validate", async (req, res) => {
 
     const result = await validateKey(
       key,
-      hwid || null,
+      hwid,
       req.ip
     );
 
@@ -149,10 +151,20 @@ router.get("/validate", async (req, res) => {
       });
     }
 
+    const session = await createSession({
+      keyId: result.key.id,
+      hwid,
+      expiresInSeconds: SESSION_LIFETIME_SECONDS
+    });
+
     return res.json({
       success: true,
       valid: true,
       bound: result.bound,
+      session: {
+        token: session.token,
+        expiresAt: session.expires_at
+      },
       key: {
         id: result.key.id,
         scriptId: result.key.script_id,
@@ -186,7 +198,8 @@ router.get("/validate", async (req, res) => {
  */
 router.post("/validate", async (req, res) => {
   try {
-    const { key, hwid } = req.body;
+    const key = req.body.key;
+    const hwid = req.body.hwid || null;
 
     if (!key) {
       return res.status(400).json({
@@ -198,7 +211,7 @@ router.post("/validate", async (req, res) => {
 
     const result = await validateKey(
       key,
-      hwid || null,
+      hwid,
       req.ip
     );
 
@@ -210,10 +223,20 @@ router.post("/validate", async (req, res) => {
       });
     }
 
+    const session = await createSession({
+      keyId: result.key.id,
+      hwid,
+      expiresInSeconds: SESSION_LIFETIME_SECONDS
+    });
+
     return res.json({
       success: true,
       valid: true,
       bound: result.bound,
+      session: {
+        token: session.token,
+        expiresAt: session.expires_at
+      },
       key: {
         id: result.key.id,
         scriptId: result.key.script_id,
@@ -229,6 +252,100 @@ router.post("/validate", async (req, res) => {
     return res.status(500).json({
       success: false,
       valid: false,
+      error: "INTERNAL_ERROR"
+    });
+  }
+});
+
+/*
+ * POST /v1/keys/session/validate
+ *
+ * Validate an existing session.
+ *
+ * Body:
+ * {
+ *   "token": "SHIELD-SESSION-...",
+ *   "hwid": "device-001"
+ * }
+ */
+router.post("/session/validate", async (req, res) => {
+  try {
+    const token = req.body.token;
+    const hwid = req.body.hwid || null;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        valid: false,
+        error: "SESSION_TOKEN_REQUIRED"
+      });
+    }
+
+    const result = await validateSession(token, hwid);
+
+    if (!result.valid) {
+      return res.status(403).json({
+        success: false,
+        valid: false,
+        error: result.error
+      });
+    }
+
+    return res.json({
+      success: true,
+      valid: true,
+      session: {
+        id: result.session.id,
+        keyId: result.session.key_id,
+        expiresAt: result.session.expires_at,
+        createdAt: result.session.created_at
+      }
+    });
+  } catch (error) {
+    console.error("Validate session error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      valid: false,
+      error: "INTERNAL_ERROR"
+    });
+  }
+});
+
+/*
+ * POST /v1/keys/session/revoke
+ *
+ * Revoke the current session.
+ */
+router.post("/session/revoke", async (req, res) => {
+  try {
+    const token = req.body.token;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        error: "SESSION_TOKEN_REQUIRED"
+      });
+    }
+
+    const revoked = await revokeSession(token);
+
+    if (!revoked) {
+      return res.status(404).json({
+        success: false,
+        error: "SESSION_NOT_FOUND"
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Session revoked"
+    });
+  } catch (error) {
+    console.error("Revoke session error:", error.message);
+
+    return res.status(500).json({
+      success: false,
       error: "INTERNAL_ERROR"
     });
   }
